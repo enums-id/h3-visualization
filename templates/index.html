@@ -1,0 +1,774 @@
+{{ define "content" }}
+<div class="page-grid">
+
+  <!-- ── Use Case Tabs ─────────────────────────────────────────────── -->
+  <nav class="tabs" role="tablist" aria-label="Use cases">
+    {{ range .UseCases }}
+    <button type="button"
+            class="tab {{ if eq $.UseCase .ID }}active{{ end }}"
+            data-uc="{{ .ID }}"
+            role="tab"
+            aria-selected="{{ if eq $.UseCase .ID }}true{{ else }}false{{ end }}"
+            onclick="switchUseCase('{{ .ID }}')">
+      {{ .Label }}
+    </button>
+    {{ end }}
+  </nav>
+
+  <!-- ── Main Form ──────────────────────────────────────────────────── -->
+  <div class="card form-card">
+    <form method="POST" action="/run" id="main-form">
+      <input type="hidden" name="use_case" id="use_case" value="{{ .UseCase }}">
+
+      <!-- ══ Point Indexing ══════════════════════════════════════════ -->
+      <section class="use-case-section" id="section-point_indexing"
+               aria-label="Point Indexing">
+        <div class="section-header">
+          <h2>Point Indexing</h2>
+          <p class="section-desc">Convert a geographic coordinate to an H3 cell at a given resolution.</p>
+        </div>
+
+        <div class="map-hint">📍 Click the map to place the point, or edit values directly below.</div>
+        <div class="map-container" id="map-pi"></div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="pi_lat">Latitude</label>
+            <input type="number" id="pi_lat" name="pi_lat" step="any"
+                   value="{{ index .FormValues "pi_lat" }}" placeholder="-6.2">
+          </div>
+          <div class="field">
+            <label for="pi_lng">Longitude</label>
+            <input type="number" id="pi_lng" name="pi_lng" step="any"
+                   value="{{ index .FormValues "pi_lng" }}" placeholder="106.816666">
+          </div>
+          <div class="field">
+            <label for="pi_resolution">Resolution</label>
+            <select id="pi_resolution" name="pi_resolution">
+              {{ range $.Resolutions }}
+              <option value="{{ . }}"
+                {{ if eq (printf "%d" .) (index $.FormValues "pi_resolution") }}selected{{ end }}>
+                {{ . }}
+              </option>
+              {{ end }}
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══ Neighborhood Analysis ════════════════════════════════════ -->
+      <section class="use-case-section" id="section-neighborhood_analysis"
+               aria-label="Neighborhood Analysis">
+        <div class="section-header">
+          <h2>Neighborhood Analysis</h2>
+          <p class="section-desc">Find all H3 cells within k rings of a center cell (GridDisk).</p>
+        </div>
+
+        <div class="info-box">
+          <span class="info-icon">ℹ️</span>
+          H3 cell IDs are 15-character hexadecimal strings, e.g. <code>8928308280fffff</code>
+        </div>
+
+        <div class="field-row">
+          <div class="field field-wide">
+            <label for="na_center_cell">Center Cell (H3 ID)</label>
+            <input type="text" id="na_center_cell" name="na_center_cell"
+                   value="{{ index .FormValues "na_center_cell" }}"
+                   placeholder="8928308280fffff" spellcheck="false">
+          </div>
+          <div class="field">
+            <label for="na_k">Ring Size (k)</label>
+            <input type="number" id="na_k" name="na_k" min="0" max="20"
+                   value="{{ index .FormValues "na_k" }}" placeholder="1">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field field-check">
+            <label class="checkbox-label">
+              <input type="checkbox" id="na_include_center" name="na_include_center"
+                     value="true"
+                     {{ if eq (index .FormValues "na_include_center") "true" }}checked{{ end }}>
+              <span>Include center cell in result</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══ Service Area Coverage ════════════════════════════════════ -->
+      <section class="use-case-section" id="section-service_area_coverage"
+               aria-label="Service Area Coverage">
+        <div class="section-header">
+          <h2>Service Area Coverage</h2>
+          <p class="section-desc">Fill a polygon with H3 cells at a given resolution (PolygonToCells).</p>
+        </div>
+
+        <div class="map-hint">🖊️ Click the map to add polygon vertices. At least 3 points required.</div>
+        <div class="map-container" id="map-sac"></div>
+
+        <div class="map-controls">
+          <button type="button" class="btn btn-sm btn-outline" onclick="sacUndoLast()">↩ Undo Last Point</button>
+          <button type="button" class="btn btn-sm btn-outline btn-danger" onclick="sacClear()">✕ Clear All</button>
+          <span class="point-count" id="sac-point-count">0 points</span>
+        </div>
+
+        <!-- Hidden field stores polygon JSON -->
+        <input type="hidden" id="sac_polygon_json" name="sac_polygon_json"
+               value="{{ index .FormValues "sac_polygon_json" }}">
+
+        <div class="field-row">
+          <div class="field">
+            <label for="sac_resolution">Resolution</label>
+            <select id="sac_resolution" name="sac_resolution">
+              {{ range $.Resolutions }}
+              <option value="{{ . }}"
+                {{ if eq (printf "%d" .) (index $.FormValues "sac_resolution") }}selected{{ end }}>
+                {{ . }}
+              </option>
+              {{ end }}
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══ Route Cells ══════════════════════════════════════════════ -->
+      <section class="use-case-section" id="section-route_cells"
+               aria-label="Route Cells">
+        <div class="section-header">
+          <h2>Route Cells</h2>
+          <p class="section-desc">Find the H3 cells along the grid path between two cells (GridPathCells).</p>
+        </div>
+
+        <div class="info-box">
+          <span class="info-icon">ℹ️</span>
+          Enter two H3 cell IDs. They should be at the same resolution for a valid path.
+        </div>
+
+        <div class="field-row">
+          <div class="field field-wide">
+            <label for="rc_origin_cell">Origin Cell (H3 ID)</label>
+            <input type="text" id="rc_origin_cell" name="rc_origin_cell"
+                   value="{{ index .FormValues "rc_origin_cell" }}"
+                   placeholder="8928308280fffff" spellcheck="false">
+          </div>
+          <div class="field field-wide">
+            <label for="rc_destination_cell">Destination Cell (H3 ID)</label>
+            <input type="text" id="rc_destination_cell" name="rc_destination_cell"
+                   value="{{ index .FormValues "rc_destination_cell" }}"
+                   placeholder="8928308280bffff" spellcheck="false">
+          </div>
+        </div>
+      </section>
+
+      <!-- ══ Surge Simulation ═════════════════════════════════════════ -->
+      <section class="use-case-section" id="section-surge_simulation"
+               aria-label="Surge Simulation">
+        <div class="section-header">
+          <h2>Surge Simulation</h2>
+          <p class="section-desc">Simulate ride-hailing surge: find nearby drivers, estimate ETAs, and score surge.</p>
+        </div>
+
+        <div class="map-hint">🗺️ Use the mode buttons to place markers on the map.</div>
+
+        <div class="ss-mode-bar">
+          <button type="button" class="ss-mode-btn active" data-mode="customer"
+                  onclick="setSSMode('customer')">👤 Set Customer</button>
+          <button type="button" class="ss-mode-btn" data-mode="driver"
+                  onclick="setSSMode('driver')">🚗 Add Driver</button>
+          <button type="button" class="ss-mode-btn" data-mode="destination"
+                  onclick="setSSMode('destination')">🏁 Set Destination</button>
+        </div>
+
+        <div class="map-container" id="map-ss"></div>
+
+        <div class="map-controls">
+          <button type="button" class="btn btn-sm btn-outline btn-danger"
+                  onclick="ssRemoveLastDriver()">↩ Remove Last Driver</button>
+          <span class="point-count" id="ss-driver-count">0 drivers</span>
+        </div>
+
+        <!-- Hidden coordinate fields -->
+        <input type="hidden" id="ss_customer_lat" name="ss_customer_lat"
+               value="{{ index .FormValues "ss_customer_lat" }}">
+        <input type="hidden" id="ss_customer_lng" name="ss_customer_lng"
+               value="{{ index .FormValues "ss_customer_lng" }}">
+        <input type="hidden" id="ss_drivers_json" name="ss_drivers_json"
+               value="{{ index .FormValues "ss_drivers_json" }}">
+        <input type="hidden" id="ss_destination_lat" name="ss_destination_lat"
+               value="{{ index .FormValues "ss_destination_lat" }}">
+        <input type="hidden" id="ss_destination_lng" name="ss_destination_lng"
+               value="{{ index .FormValues "ss_destination_lng" }}">
+
+        <div class="coord-display" id="ss-coords">
+          <div class="coord-chip chip-customer">
+            👤 Customer: <span id="disp-cust">loading…</span>
+          </div>
+          <div class="coord-chip chip-dest">
+            🏁 Destination: <span id="disp-dest">loading…</span>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="ss_resolution">Resolution</label>
+            <select id="ss_resolution" name="ss_resolution">
+              {{ range $.Resolutions }}
+              <option value="{{ . }}"
+                {{ if eq (printf "%d" .) (index $.FormValues "ss_resolution") }}selected{{ end }}>
+                {{ . }}
+              </option>
+              {{ end }}
+            </select>
+          </div>
+          <div class="field">
+            <label for="ss_avg_speed_kmh">Avg Speed (km/h)</label>
+            <input type="number" id="ss_avg_speed_kmh" name="ss_avg_speed_kmh" step="any" min="1"
+                   value="{{ index .FormValues "ss_avg_speed_kmh" }}" placeholder="30">
+          </div>
+          <div class="field">
+            <label for="ss_pickup_service_minutes">Pickup Time (min)</label>
+            <input type="number" id="ss_pickup_service_minutes" name="ss_pickup_service_minutes"
+                   step="any" min="0"
+                   value="{{ index .FormValues "ss_pickup_service_minutes" }}" placeholder="2">
+          </div>
+          <div class="field">
+            <label for="ss_neighborhood_k">Neighborhood k</label>
+            <input type="number" id="ss_neighborhood_k" name="ss_neighborhood_k" min="0" max="10"
+                   value="{{ index .FormValues "ss_neighborhood_k" }}" placeholder="1">
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Submit ──────────────────────────────────────────────────── -->
+      <div class="form-footer">
+        <button type="submit" class="btn btn-primary">▶ Run Use Case</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ── Result Card ────────────────────────────────────────────────── -->
+  {{ if .ErrorMessage }}
+  <div class="card result-card result-error" id="result">
+    <div class="result-header">
+      <span class="result-icon">⚠️</span>
+      <h3>Error</h3>
+    </div>
+    <p class="error-text">{{ .ErrorMessage }}</p>
+  </div>
+  {{ end }}
+
+  {{ if .ResultJSON }}
+  <div class="card result-card result-success" id="result">
+    <div class="result-header">
+      <span class="result-icon">✅</span>
+      <h3>Result</h3>
+      <div class="result-view-tabs">
+        <button type="button" class="btn btn-sm btn-outline active" id="btn-json-view"
+                onclick="showResultView('json')">{ } JSON</button>
+        <button type="button" class="btn btn-sm btn-outline" id="btn-map-view"
+                onclick="showResultView('map')">🗺️ Map</button>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline copy-btn"
+              onclick="copyResult()">📋 Copy</button>
+    </div>
+    <div id="result-json-view">
+      <pre class="json-output">{{ .ResultJSON }}</pre>
+    </div>
+    <div id="result-map-view" style="display:none">
+      <div id="result-map" style="height:420px;border-radius:8px;overflow:hidden;"></div>
+      <div id="result-map-legend" class="result-legend"></div>
+    </div>
+  </div>
+  {{ end }}
+
+</div><!-- .page-grid -->
+
+<script>
+// ── Leaflet Map helpers ────────────────────────────────────────────────────
+
+var DEFAULT_CENTER = [-6.2, 106.82];
+var DEFAULT_ZOOM   = 13;
+var TILE_URL  = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+var TILE_ATTR = '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
+function makeTileLayer() {
+  return L.tileLayer(TILE_URL, { attribution: TILE_ATTR, maxZoom: 19 });
+}
+
+function makeDivIcon(bg, label, size) {
+  size = size || 30;
+  return L.divIcon({
+    html: '<div style="background:' + bg + ';color:#fff;border-radius:50%;width:' + size + 'px;height:' + size + 'px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;border:2px solid rgba(255,255,255,0.9);box-shadow:0 2px 6px rgba(0,0,0,0.35)">' + label + '</div>',
+    className: '',
+    iconSize:   [size, size],
+    iconAnchor: [size/2, size/2],
+  });
+}
+
+// ── Point Indexing Map ─────────────────────────────────────────────────────
+
+var mapPI = null, markerPI = null;
+
+function initMapPI() {
+  if (mapPI) { mapPI.invalidateSize(); return; }
+
+  var lat = parseFloat(document.getElementById('pi_lat').value) || DEFAULT_CENTER[0];
+  var lng = parseFloat(document.getElementById('pi_lng').value) || DEFAULT_CENTER[1];
+
+  mapPI = L.map('map-pi').setView([lat, lng], DEFAULT_ZOOM);
+  makeTileLayer().addTo(mapPI);
+
+  var icon = makeDivIcon('#2563eb', '📍', 32);
+  markerPI = L.marker([lat, lng], { icon: icon, draggable: true }).addTo(mapPI);
+  markerPI.on('move', function(e) { updatePICoords(e.latlng); });
+
+  mapPI.on('click', function(e) {
+    markerPI.setLatLng(e.latlng);
+    updatePICoords(e.latlng);
+  });
+}
+
+function updatePICoords(latlng) {
+  document.getElementById('pi_lat').value = latlng.lat.toFixed(6);
+  document.getElementById('pi_lng').value = latlng.lng.toFixed(6);
+}
+
+// Sync typed lat/lng back to marker
+document.addEventListener('DOMContentLoaded', function() {
+  ['pi_lat', 'pi_lng'].forEach(function(id) {
+    document.getElementById(id).addEventListener('change', function() {
+      if (!mapPI) return;
+      var lat = parseFloat(document.getElementById('pi_lat').value);
+      var lng = parseFloat(document.getElementById('pi_lng').value);
+      if (!isNaN(lat) && !isNaN(lng)) {
+        var ll = L.latLng(lat, lng);
+        markerPI.setLatLng(ll);
+        mapPI.panTo(ll);
+      }
+    });
+  });
+});
+
+// ── Service Area Coverage Map ──────────────────────────────────────────────
+
+var mapSAC = null;
+var sacPoints = [];
+var sacMarkers = [];
+var sacPolygon = null;
+
+function initMapSAC() {
+  if (mapSAC) { mapSAC.invalidateSize(); return; }
+
+  mapSAC = L.map('map-sac').setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+  makeTileLayer().addTo(mapSAC);
+
+  // Load initial polygon from hidden field
+  var raw = document.getElementById('sac_polygon_json').value;
+  if (raw) {
+    try {
+      sacPoints = JSON.parse(raw);
+    } catch(e) { sacPoints = []; }
+    redrawSAC();
+  }
+
+  mapSAC.on('click', function(e) {
+    sacPoints.push([parseFloat(e.latlng.lat.toFixed(6)), parseFloat(e.latlng.lng.toFixed(6))]);
+    updateSACField();
+    redrawSAC();
+  });
+}
+
+function redrawSAC() {
+  sacMarkers.forEach(function(m) { mapSAC.removeLayer(m); });
+  sacMarkers = [];
+  if (sacPolygon) { mapSAC.removeLayer(sacPolygon); sacPolygon = null; }
+
+  sacPoints.forEach(function(pt, i) {
+    var icon = makeDivIcon('#0ea5e9', i + 1, 26);
+    var m = L.marker([pt[0], pt[1]], { icon: icon }).addTo(mapSAC);
+    sacMarkers.push(m);
+  });
+
+  if (sacPoints.length >= 3) {
+    sacPolygon = L.polygon(sacPoints, {
+      color: '#0ea5e9', weight: 2, fillOpacity: 0.15
+    }).addTo(mapSAC);
+  }
+
+  var el = document.getElementById('sac-point-count');
+  if (el) el.textContent = sacPoints.length + ' point' + (sacPoints.length !== 1 ? 's' : '');
+}
+
+function updateSACField() {
+  document.getElementById('sac_polygon_json').value = JSON.stringify(sacPoints);
+}
+
+function sacUndoLast() {
+  sacPoints.pop();
+  updateSACField();
+  redrawSAC();
+}
+
+function sacClear() {
+  sacPoints = [];
+  updateSACField();
+  redrawSAC();
+}
+
+// ── Surge Simulation Map ───────────────────────────────────────────────────
+
+var mapSS    = null;
+var ssMode   = 'customer';
+var ssCustM  = null;
+var ssDestM  = null;
+var ssDriverMs = [];
+var ssDrivers  = [];
+
+var ICON_CUST = null;
+var ICON_DEST = null;
+var ICON_DRV  = null;
+
+function initMapSS() {
+  if (mapSS) { mapSS.invalidateSize(); return; }
+
+  ICON_CUST = makeDivIcon('#ef4444', '👤', 32);
+  ICON_DEST = makeDivIcon('#8b5cf6', '🏁', 32);
+  ICON_DRV  = makeDivIcon('#22c55e', '🚗', 32);
+
+  mapSS = L.map('map-ss').setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+  makeTileLayer().addTo(mapSS);
+
+  // Load initial values
+  var cLat = parseFloat(document.getElementById('ss_customer_lat').value);
+  var cLng = parseFloat(document.getElementById('ss_customer_lng').value);
+  if (!isNaN(cLat) && !isNaN(cLng)) {
+    ssCustM = L.marker([cLat, cLng], { icon: ICON_CUST, draggable: true })
+      .bindTooltip('Customer').addTo(mapSS);
+    ssCustM.on('move', function(e) { updateSSCustomer(e.latlng); });
+    updateSSCustomer(L.latLng(cLat, cLng));
+  }
+
+  var dLat = parseFloat(document.getElementById('ss_destination_lat').value);
+  var dLng = parseFloat(document.getElementById('ss_destination_lng').value);
+  if (!isNaN(dLat) && !isNaN(dLng)) {
+    ssDestM = L.marker([dLat, dLng], { icon: ICON_DEST, draggable: true })
+      .bindTooltip('Destination').addTo(mapSS);
+    ssDestM.on('move', function(e) { updateSSDest(e.latlng); });
+    updateSSDest(L.latLng(dLat, dLng));
+  }
+
+  var drvsRaw = document.getElementById('ss_drivers_json').value;
+  if (drvsRaw) {
+    try { ssDrivers = JSON.parse(drvsRaw); } catch(e) { ssDrivers = []; }
+    ssDrivers.forEach(function(d, i) {
+      var m = L.marker([d.lat, d.lng], { icon: ICON_DRV })
+        .bindTooltip('Driver ' + (i + 1)).addTo(mapSS);
+      ssDriverMs.push(m);
+    });
+  }
+  updateSSDriverCount();
+
+  mapSS.on('click', function(e) {
+    switch(ssMode) {
+      case 'customer':
+        if (ssCustM) ssCustM.setLatLng(e.latlng);
+        else {
+          ssCustM = L.marker(e.latlng, { icon: ICON_CUST, draggable: true })
+            .bindTooltip('Customer').addTo(mapSS);
+          ssCustM.on('move', function(ev) { updateSSCustomer(ev.latlng); });
+        }
+        updateSSCustomer(e.latlng);
+        break;
+
+      case 'driver':
+        ssDrivers.push({ lat: parseFloat(e.latlng.lat.toFixed(6)), lng: parseFloat(e.latlng.lng.toFixed(6)) });
+        var m = L.marker(e.latlng, { icon: ICON_DRV })
+          .bindTooltip('Driver ' + ssDrivers.length).addTo(mapSS);
+        ssDriverMs.push(m);
+        document.getElementById('ss_drivers_json').value = JSON.stringify(ssDrivers);
+        updateSSDriverCount();
+        break;
+
+      case 'destination':
+        if (ssDestM) ssDestM.setLatLng(e.latlng);
+        else {
+          ssDestM = L.marker(e.latlng, { icon: ICON_DEST, draggable: true })
+            .bindTooltip('Destination').addTo(mapSS);
+          ssDestM.on('move', function(ev) { updateSSDest(ev.latlng); });
+        }
+        updateSSDest(e.latlng);
+        break;
+    }
+  });
+}
+
+function updateSSCustomer(latlng) {
+  document.getElementById('ss_customer_lat').value = latlng.lat.toFixed(6);
+  document.getElementById('ss_customer_lng').value = latlng.lng.toFixed(6);
+  var el = document.getElementById('disp-cust');
+  if (el) el.textContent = latlng.lat.toFixed(4) + ', ' + latlng.lng.toFixed(4);
+}
+
+function updateSSDest(latlng) {
+  document.getElementById('ss_destination_lat').value = latlng.lat.toFixed(6);
+  document.getElementById('ss_destination_lng').value = latlng.lng.toFixed(6);
+  var el = document.getElementById('disp-dest');
+  if (el) el.textContent = latlng.lat.toFixed(4) + ', ' + latlng.lng.toFixed(4);
+}
+
+function updateSSDriverCount() {
+  var el = document.getElementById('ss-driver-count');
+  if (el) el.textContent = ssDrivers.length + ' driver' + (ssDrivers.length !== 1 ? 's' : '');
+}
+
+function ssRemoveLastDriver() {
+  if (ssDrivers.length === 0) return;
+  ssDrivers.pop();
+  var m = ssDriverMs.pop();
+  if (m && mapSS) mapSS.removeLayer(m);
+  document.getElementById('ss_drivers_json').value = JSON.stringify(ssDrivers);
+  updateSSDriverCount();
+}
+
+function setSSMode(mode) {
+  ssMode = mode;
+  document.querySelectorAll('.ss-mode-btn').forEach(function(b) {
+    b.classList.toggle('active', b.dataset.mode === mode);
+  });
+}
+
+// ── Use Case Tab Switcher ──────────────────────────────────────────────────
+
+function switchUseCase(uc) {
+  document.getElementById('use_case').value = uc;
+
+  document.querySelectorAll('.use-case-section').forEach(function(s) {
+    s.style.display = 'none';
+  });
+  document.querySelectorAll('.tab').forEach(function(t) {
+    var isActive = t.dataset.uc === uc;
+    t.classList.toggle('active', isActive);
+    t.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+
+  var section = document.getElementById('section-' + uc);
+  if (section) section.style.display = 'block';
+
+  // Initialize / refresh maps lazily
+  setTimeout(function() {
+    if (uc === 'point_indexing')       initMapPI();
+    if (uc === 'service_area_coverage') initMapSAC();
+    if (uc === 'surge_simulation')      initMapSS();
+  }, 50);
+}
+
+// ── Result Map ─────────────────────────────────────────────────────────────
+
+var resultMap = null;
+var resultLayers = [];
+
+function showResultView(view) {
+  var jsonView = document.getElementById('result-json-view');
+  var mapView  = document.getElementById('result-map-view');
+  var btnJSON  = document.getElementById('btn-json-view');
+  var btnMap   = document.getElementById('btn-map-view');
+  if (!jsonView) return;
+
+  if (view === 'map') {
+    jsonView.style.display = 'none';
+    mapView.style.display  = '';
+    btnJSON.classList.remove('active');
+    btnMap.classList.add('active');
+    initResultMap();
+  } else {
+    mapView.style.display  = 'none';
+    jsonView.style.display = '';
+    btnMap.classList.remove('active');
+    btnJSON.classList.add('active');
+  }
+}
+
+function initResultMap() {
+  if (!resultMap) {
+    resultMap = L.map('result-map').setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+    makeTileLayer().addTo(resultMap);
+    renderResultOnMap();
+  } else {
+    resultMap.invalidateSize();
+  }
+}
+
+function cellBoundary(cellId) {
+  // h3.cellToBoundary returns [[lat, lng], ...] – directly usable by Leaflet
+  try { return h3.cellToBoundary(cellId); } catch(e) { return null; }
+}
+
+function addHexPoly(cellId, opts) {
+  var boundary = cellBoundary(cellId);
+  if (!boundary) return null;
+  var poly = L.polygon(boundary, {
+    color:       opts.color       || '#3b82f6',
+    fillColor:   opts.fillColor   || opts.color || '#3b82f6',
+    weight:      opts.weight      || 1.5,
+    fillOpacity: opts.fillOpacity != null ? opts.fillOpacity : 0.45,
+  });
+  if (opts.tooltip) poly.bindTooltip(opts.tooltip, { sticky: true });
+  poly.addTo(resultMap);
+  resultLayers.push(poly);
+  return boundary;
+}
+
+function renderResultOnMap() {
+  resultLayers.forEach(function(l) { resultMap.removeLayer(l); });
+  resultLayers = [];
+
+  var pre = document.querySelector('.json-output');
+  if (!pre) return;
+  var data;
+  try { data = JSON.parse(pre.textContent); } catch(e) { return; }
+
+  var useCase = '{{ .UseCase }}';
+  var allBounds = [];
+
+  function collect(boundary) {
+    if (boundary) allBounds = allBounds.concat(boundary);
+  }
+
+  switch (useCase) {
+
+    case 'point_indexing':
+      if (data.cell) {
+        collect(addHexPoly(data.cell, {
+          color: '#2563eb', fillColor: '#3b82f6',
+          tooltip: 'Cell: ' + data.cell,
+        }));
+        setResultLegend([{ color: '#3b82f6', label: 'H3 Cell: ' + data.cell }]);
+      }
+      break;
+
+    case 'neighborhood_analysis':
+      (data.cells || []).forEach(function(cell, i) {
+        collect(addHexPoly(cell, {
+          color: '#0369a1', fillColor: '#38bdf8',
+          tooltip: 'Cell ' + (i + 1) + ': ' + cell,
+        }));
+      });
+      setResultLegend([{ color: '#38bdf8', label: (data.cells || []).length + ' neighboring cells' }]);
+      break;
+
+    case 'service_area_coverage':
+      (data.cells || []).forEach(function(cell) {
+        collect(addHexPoly(cell, {
+          color: '#047857', fillColor: '#34d399',
+          tooltip: cell,
+        }));
+      });
+      setResultLegend([{ color: '#34d399', label: (data.cells || []).length + ' coverage cells' }]);
+      break;
+
+    case 'route_cells':
+      var path = data.path || [];
+      var n = path.length;
+      path.forEach(function(cell, i) {
+        // Gradient: origin=blue, destination=red
+        var t = n > 1 ? i / (n - 1) : 0;
+        var r = Math.round(t * 220 + (1 - t) * 37);
+        var g = Math.round(t * 38  + (1 - t) * 99);
+        var b = Math.round(t * 38  + (1 - t) * 235);
+        var color = 'rgb(' + r + ',' + g + ',' + b + ')';
+        var label = i === 0 ? 'Origin' : i === n - 1 ? 'Destination' : 'Step ' + i;
+        collect(addHexPoly(cell, {
+          color: color, fillColor: color, fillOpacity: 0.5,
+          tooltip: label + ': ' + cell,
+        }));
+      });
+      setResultLegend([
+        { color: 'rgb(37,99,235)',  label: 'Origin' },
+        { color: 'rgb(220,38,38)',  label: 'Destination' },
+        { color: 'rgb(128,69,136)', label: n + ' path cells' },
+      ]);
+      break;
+
+    case 'surge_simulation':
+      var bestCell = (data.etas && data.etas[data.best_driver_index])
+        ? data.etas[data.best_driver_index].driver_cell : null;
+
+      // Driver cells
+      (data.driver_grids || []).forEach(function(cell, i) {
+        var isBest = (cell === bestCell);
+        collect(addHexPoly(cell, {
+          color:       isBest ? '#15803d' : '#64748b',
+          fillColor:   isBest ? '#4ade80' : '#94a3b8',
+          fillOpacity: 0.55,
+          tooltip: 'Driver ' + (i + 1) + (isBest ? ' ★ Best' : '') + ': ' + cell,
+        }));
+      });
+
+      // Customer cell
+      if (data.customer_cell) {
+        collect(addHexPoly(data.customer_cell, {
+          color: '#991b1b', fillColor: '#f87171',
+          tooltip: 'Customer: ' + data.customer_cell,
+        }));
+      }
+
+      // Destination cell
+      if (data.destination_cell) {
+        collect(addHexPoly(data.destination_cell, {
+          color: '#6d28d9', fillColor: '#a78bfa',
+          tooltip: 'Destination: ' + data.destination_cell,
+        }));
+      }
+
+      var legend = [
+        { color: '#f87171', label: 'Customer' },
+        { color: '#a78bfa', label: 'Destination' },
+        { color: '#4ade80', label: 'Best driver' },
+        { color: '#94a3b8', label: 'Other drivers' },
+      ];
+      if (data.surge_multiplier != null) {
+        legend.push({ label: '⚡ Surge: ×' + data.surge_multiplier.toFixed(1) });
+      }
+      setResultLegend(legend);
+      break;
+  }
+
+  if (allBounds.length > 0) {
+    try { resultMap.fitBounds(allBounds, { padding: [30, 30] }); } catch(e) {}
+  }
+}
+
+function setResultLegend(items) {
+  var el = document.getElementById('result-map-legend');
+  if (!el) return;
+  el.innerHTML = items.map(function(item) {
+    var swatch = item.color
+      ? '<span class="legend-swatch" style="background:' + item.color + '"></span>'
+      : '';
+    return '<span class="legend-item">' + swatch + item.label + '</span>';
+  }).join('');
+}
+
+// ── Copy Result ────────────────────────────────────────────────────────────
+
+function copyResult() {
+  var pre = document.querySelector('.json-output');
+  if (!pre) return;
+  navigator.clipboard.writeText(pre.textContent).then(function() {
+    var btn = document.querySelector('.copy-btn');
+    if (btn) { btn.textContent = '✅ Copied!'; setTimeout(function() { btn.textContent = '📋 Copy'; }, 2000); }
+  });
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', function() {
+  switchUseCase('{{ .UseCase }}');
+
+  // Scroll to result after POST
+  var result = document.getElementById('result');
+  if (result) {
+    setTimeout(function() { result.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 100);
+  }
+});
+</script>
+{{ end }}

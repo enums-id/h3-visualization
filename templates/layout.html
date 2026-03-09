@@ -1,0 +1,37 @@
+{{ define "layout" }}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ .Title }}</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/leaflet.css">
+  <script src="/static/leaflet.js"></script>
+  <script src="/static/h3.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <div class="header-content">
+        <span class="logo">🗺️</span>
+        <div>
+          <h1>H3 Visualization</h1>
+          <p class="subtitle">Explore Uber's H3 hexagonal grid use cases</p>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    {{ template "content" . }}
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>Powered by <a href="https://github.com/uber/h3" target="_blank" rel="noopener">H3</a> · Go Engine</p>
+    </div>
+  </footer>
+</body>
+</html>
+{{ end }}

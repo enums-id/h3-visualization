@@ -4,8 +4,15 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/joho/godotenv"
 	"h3-visualization/internal/web"
 )
+
+func init() {
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, falling back to environment variables")
+	}
+}
 
 func main() {
 	mux := http.NewServeMux()

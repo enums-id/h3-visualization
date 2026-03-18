@@ -1,5 +1,7 @@
 package web
 
+import "os"
+
 type PageData struct {
 	Title        string
 	UseCase      string
@@ -8,6 +10,7 @@ type PageData struct {
 	FormValues   map[string]string
 	Resolutions  []int
 	UseCases     []UseCaseInfo
+	MapTilerKey  string
 }
 
 type UseCaseInfo struct {
@@ -46,5 +49,6 @@ func newPageData(useCase string) PageData {
 		FormValues:  merged,
 		Resolutions: allResolutions,
 		UseCases:    AllUseCases,
+		MapTilerKey: os.Getenv("MAPTILER_KEY"),
 	}
 }
